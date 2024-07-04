@@ -48,3 +48,7 @@ ARIMA and TBATS models are effective for forecasting the monthly mean water leve
 3. Advanced Models: Explore advanced modeling techniques like LSTM and ensemble methods.
 4. Wind Impact: Consider the impact of wind on temporary changes in water levels.
 
+# Discussion and Contact
+
+For discussions, questions, or further information about the project, feel free to contact me at pandanihar1996@gmail.com.
+
