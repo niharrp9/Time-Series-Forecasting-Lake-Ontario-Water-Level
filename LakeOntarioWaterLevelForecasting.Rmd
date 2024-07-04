@@ -1,0 +1,950 @@
+---
+title: "Lake Ontario Monthly Mean Water Level Analysis and Forecasting"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE}
+library(forecast)
+library(ggplot2)
+library(tseries)
+library(fpp)
+library(TSA)
+library(gridExtra)
+library(dplyr)
+library(scales)
+library(lubridate)
+library(reshape2)
+library(readxl)
+library(tidyverse)
+library(readr)
+library(xts)
+library(vars)
+library(caret)
+library(data.table)
+library(tidyr)
+```
+
+<style>
+.justified {
+  text-align: justify;
+  text-justify: inter-word;
+}
+</style>
+
+<div class="justified">
+
+**The data set is the Monthly Mean Water Level of the Great Lakes (in meters) from Jan 1950 to Dec 2017. Moreover, the data also has the mean temperature (in deg C) of City of Toronto and the evaporation and precipitation of the Lake Ontario (in mm).** 
+
+</div>
+
+
+```{r, warning=FALSE, message=FALSE}
+
+#Loading the data set
+
+setwd("C:\\Users\\nihar\\Desktop\\Time Series\\Final Project")
+data <- read.csv("water_level_meta_data.csv")
+head(data)
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+
+#Water level of Lake Ontario
+water_level_lake_ont_ts <- ts(data$Ontario, start = c(1980,1), frequency = 12) 
+water_level_lake_ont_ts
+
+#Plot Lake Ontario Water Level
+tsdisplay(water_level_lake_ont_ts)
+
+#Time Series Decomposition
+plot(stl(water_level_lake_ont_ts, s.window = "periodic"))
+
+#ACF and PACF plot
+acf(water_level_lake_ont_ts, main = "ACF plot Lake Ontario Water Level", drop.lag.0 = TRUE)
+pacf(water_level_lake_ont_ts, main = "PACF plot Lake Ontario Water Level")
+
+#Check for BoxCox Transformation
+BoxCox.lambda(water_level_lake_ont_ts)
+plot(BoxCox(water_level_lake_ont_ts, lambda = "auto"))
+plot(water_level_lake_ont_ts)
+shapiro.test(water_level_lake_ont_ts)
+
+#Stationarity test
+adf.test(water_level_lake_ont_ts)
+adf.test(diff(water_level_lake_ont_ts))
+
+```
+```{r, warning=FALSE, message=FALSE}
+
+#Mean Temperature of City of Toronto
+temp_toronto <- ts(data$Mean.Temperature, start = c(1980,1), frequency = 12)
+temp_toronto
+
+#For ACF and PACF plots
+temp_toronto1 <- ts(data$Mean.Temperature, start = c(1980,1), frequency = 1)
+temp_toronto1
+
+#Time Series Decomposition
+plot(stl(temp_toronto, s.window = "periodic"))
+
+#ACF and PACF plot
+acf(temp_toronto1, main = "ACF plot - Temperature of Toronto", drop.lag.0 = TRUE)
+pacf(temp_toronto1, main = "ACF plot - Temperature of Toronto")
+
+#Check for BoxCox Transformation
+BoxCox.lambda(temp_toronto) #No need for boxcox
+
+
+#Stationarity test
+adf.test(water_level_lake_ont_ts)
+adf.test(diff(water_level_lake_ont_ts))
+
+```
+```{r, warning=FALSE, message=FALSE}
+
+#Evaporation Rate
+evap_lake_ont <- ts(data$Evaporation, start = c(1980,1), frequency = 12)
+evap_lake_ont
+
+#For ACF and PACF plots
+evap_lake_ont1 <- ts(data$Evaporation, start = c(1980,1), frequency = 1)
+
+tsdisplay(evap_lake_ont1)
+
+#Time Series Decomposition
+plot(stl(evap_lake_ont, s.window = "periodic"))
+
+#ACF and PACF plot
+acf(evap_lake_ont1, main = "ACF Plot - Net Evaporation - Lake Ontario", drop.lag.0 = TRUE)
+pacf(evap_lake_ont1, main = "PACF - Net Evaporation - Lake Ontario")
+
+#Check for BoxCox Transformation
+BoxCox.lambda(evap_lake_ont) #No need for BoxCox
+
+#Stationarity test
+adf.test(evap_lake_ont)
+adf.test(diff(evap_lake_ont))
+
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+
+#Precipitation Rate
+precip_lake_ont <- ts(data$Precipitation, start = c(1980,1), frequency = 12)
+precip_lake_ont
+
+#For ACF and PACF plots
+precip_lake_ont1 <- ts(data$Precipitation, start = c(1980,1), frequency = 1)
+
+tsdisplay(precip_lake_ont1)
+
+#Time Series Decomposition
+plot(stl(precip_lake_ont, s.window = "periodic"))
+
+#ACF and PACF plot
+acf(precip_lake_ont1, main = "ACF Plot - Net Precipitation - Lake Ontario", drop.lag.0 = TRUE)
+pacf(precip_lake_ont1, main = "PACF - Net Precipitation - Lake Ontario")
+
+#Check for BoxCox Transformation
+BoxCox.lambda(precip_lake_ont)
+plot(BoxCox(precip_lake_ont, lambda = "auto"))
+
+#Stationarity test
+adf.test(precip_lake_ont)
+adf.test(diff(precip_lake_ont))
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+
+cor_matrix <- cor(data[, c(3:10)], use = "complete.obs") 
+print(cor_matrix)
+
+# Melt the correlation matrix for visualization
+cor_melt <- melt(cor_matrix)
+
+# Plot the correlation matrix
+ggplot(data = cor_melt, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1,1), space = "Lab", 
+                       name="Pearson\nCorrelation") +
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, size = 12, hjust = 1),
+        axis.text.y = element_text(size = 12)) +
+  labs(x = '', y = '', title = 'Correlation matrix between various features')
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+
+#Training and Test Data Split
+
+# Create the training dataset (1980-2009)
+train_data <- data[data$Year >= 1980 & data$Year <= 2009, ]
+
+# Create the test dataset (2010-2017)
+test_data <- data[data$Year >= 2010 & data$Year <= 2017, ]
+
+train_superior <- ts(train_data$Superior, start = c(1980,1), end = c(2009, 12), frequency = 12)
+train_eerie <- ts(train_data$Erie, start = c(1980,1), end = c(2009, 12), frequency = 12)
+train_mich_huron <- ts(train_data$Michigan.Huron, start = c(1980,1), end = c(2009, 12), frequency = 12)
+train_stclair <- ts(train_data$St..Clair, start = c(1980,1), end = c(2009, 12), frequency = 12)
+
+#Water level
+train_water_level <- window(water_level_lake_ont_ts, start = c(1980,1), end = c(2009, 12))
+test_water_level <- window(water_level_lake_ont_ts, start = c(2010,1), end = c(2017, 12))
+
+#Temperature
+train_temp <- window(temp_toronto,start = c(1980,1), end = c(2009, 12))
+test_temp <- window(temp_toronto, start = c(2010,1), end = c(2017, 12) )
+
+#Evaporation
+train_evap <- window(evap_lake_ont, start = c(1980,1), end = c(2009, 12))
+test_evap <- window(evap_lake_ont, start = c(2010,1), end = c(2017, 12))
+
+#Precipitation
+train_precip <- window(precip_lake_ont, start = c(1980,1), end = c(2009, 12))
+test_precip <- window(precip_lake_ont, start = c(2010,1), end = c(2017, 12))
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+
+#Time Series Linear Model
+
+tslm_model <- tslm(train_water_level ~ train_superior + train_eerie + train_stclair + train_mich_huron + train_temp + train_evap + train_precip)
+summary(tslm_model)
+checkresiduals(tslm_model)
+Box.test(tslm_model$residuals, type = "Ljung-Box")
+
+future_data <- data.frame(
+  train_superior = rep(train_superior, 0.27),
+  train_eerie = rep(train_eerie, 0.27),
+  train_stclair = rep(train_stclair, 0.27),
+  train_mich_huron = rep(train_mich_huron, 0.27),
+  train_temp = rep(train_temp, 0.27),
+  train_evap = rep(train_evap, 0.27),
+  train_precip = rep(train_precip, 0.27)
+)
+
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+
+#OLS Model
+
+model1 <- lm(Ontario ~ Superior + Michigan.Huron + St..Clair + Erie + Mean.Temperature + Evaporation + Precipitation, data = train_data)
+summary(model1)
+checkresiduals(model1)
+
+model2 <- lm(Ontario ~ St..Clair + Erie + Mean.Temperature + Evaporation, data = data)
+summary(model2)
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+
+#ETS Models
+
+model3 <- ets(train_water_level)
+summary(model3)
+checkresiduals(model3)
+
+#Forecast
+fcast_model3 <- forecast(model3, h=96)
+fcast_model3
+ets_fcast <- fcast_model3$mean
+plot(fcast_model3, xlab = "Year", ylab = "Water Level (in m)")
+accuracy(fcast_model3, test_water_level)
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+
+#Arima Model
+
+model4 <- Arima(train_water_level, order = c(1,0,1), seasonal = c(2,0,2), lambda = "auto")
+model5 <- Arima(train_water_level, order = c(2,0,1), seasonal = c(2,0,2), lambda = "auto")
+#model5 <- Arima(train_water_level, order = c(2,0,1), seasonal = c(3,1,3), lambda = "auto", method = "ML")
+
+model_comparison <- data.frame(Model = c("ARIMA(1,0,1)(2,0,2)[12]", "ARIMA(2,0,1)(2,0,2)[12]"), AICc = c(model4$aicc, model5$aicc), BIC = c(model4$bic, model5$bic))
+model_comparison
+checkresiduals(model4)
+summary(model4)
+fcast_model4 <- forecast(model4, h=96)
+fcast_model4
+arima_fcast <- fcast_model4$mean
+plot(fcast_model4, xlab = "Year", ylab = "Water level (in m)")
+accuracy(fcast_model4, test_water_level)
+```
+
+```{r, warning=FALSE, message=FALSE}
+
+#Regression with Arima Errors
+#head(train_data)
+train_regressors <- as.matrix(train_data[, c("Superior","Michigan.Huron","St..Clair", "Erie", "Mean.Temperature", "Evaporation", "Precipitation")])
+#train_regressors <- as.matrix(train_data[, c("Superior","Michigan.Huron","Erie", "St..Clair")])
+
+model_reg <- Arima(train_water_level, order = c(1,0,1), seasonal = c(2,0,2), xreg = train_regressors, lambda = "auto")
+summary(model_reg)
+checkresiduals(model_reg)
+accuracy(forecast(model_reg, xreg = train_regressors))
+
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+
+#VAR Model
+
+train_data1 <- copy(train_data)
+train_data1$Mean.Temperature <- BoxCox(train_data1$Mean.Temperature, lambda = "auto")
+train_data1$Ontario <- BoxCox(train_data1$Ontario, lambda = "auto")
+train_data1$Evaporation <- BoxCox(train_data1$Evaporation, lambda = "auto")
+train_data1$Precipitation <- BoxCox(train_data1$Precipitation, lambda = "auto")
+train_data1
+
+VARselect(train_data1[,7:10], lag.max = 10, type = "const")$selection
+model7_transformed <- VAR(train_data1[,7:10], p=3, type = "const")
+coef(model7_transformed)
+plot(acf(residuals(model7_transformed)))
+serial.test(model7_transformed, lags.pt = 10, type="PT.asymptotic")
+
+VARselect(train_data[,7:10], lag.max = 10, type = "const")$selection
+model7 <- VAR(train_data[,7:10], p=4, type = "const")
+coef(model7)
+plot(acf(residuals(model7)))
+serial.test(model7, lags.pt = 10, type="PT.asymptotic")
+
+#Forecast
+fcast_model7 <- predict(model7_transformed, n.ahead = 96)
+fcast_model7
+fcast_model7 <- 10^fcast_model7$fcst$Ontario
+VAR_ontario <- ts(fcast_model7, start = c(2010,1), frequency = 12)
+plot(VAR_ontario)
+```
+
+```{r, warning=FALSE, message=FALSE}
+
+#Periodogram
+
+periodogram(train_water_level, log = "no", plot = TRUE)
+
+#Dynamic Harmonic Regression
+
+model8 <- auto.arima(train_water_level, d=1, xreg = fourier(train_water_level, 4), seasonal=FALSE, lambda = "auto", approximation = FALSE)
+#try seasonal true to see the best model
+summary(model8)
+  checkresiduals(model8)
+fcast_model8 <- forecast(model8, xreg = fourier(train_water_level, 4, 156))
+plot(fcast_model8)
+accuracy(fcast_model8, test_water_level)
+
+#TBATS Model
+  
+  model9 <- tbats(train_water_level, use.box.cox = TRUE, seasonal.periods = c(12,5))
+  model9
+  summary(model9)
+  checkresiduals(model9)
+  fcast_model9 <- forecast(model9, h=96)
+  plot(fcast_model9, xlab = "Year", ylab = "Water Level (in m)")
+  accuracy(fcast_model9, test_water_level)
+  tbats.components(model9)
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+
+#NNAR Model Best Parameter Selection 
+
+best_size <- NULL
+best_repeats <- NULL
+best_rmse <- Inf
+best_model <- NULL
+
+
+size_range <- 5:50
+repeats_range <- seq(10, 50, by = 10)
+
+
+for (size in size_range) {
+
+  for (repeats in repeats_range) {
+
+    model <- nnetar(train_water_level, P=12, size=size, repeats=repeats, lambda="auto")
+    
+
+    predictions <- forecast(model, h=96)
+    
+    # Calculate RMSE
+    acc <- accuracy(predictions, test_water_level)
+    rmse <- acc[2,2]
+    
+    # Update best model if current model has lower RMSE
+    if (rmse < best_rmse) {
+      best_rmse <- rmse
+      best_size <- size
+      best_repeats <- repeats
+      best_model <- model
+    }
+  }
+}
+
+# Print the best model's parameters and RMSE
+cat("Best Model Parameters:\n")
+cat("Size: ", best_size, "\n")
+cat("Repeats: ", best_repeats, "\n")
+cat("Best RMSE: ", best_rmse, "\n")
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+set.seed(123)
+
+decay_range <- seq(0.1, 1, by = 0.1)
+
+best_size <- NULL
+best_repeats <- NULL
+best_rmse <- Inf
+best_model <- NULL
+
+for(P in 1:12){
+  for(d in decay_range){
+    nnetar_model <- nnetar(train_water_level, P=P, size = 11, repeats = 20, lambda = "auto", decay = d)
+    predictions <- forecast(model, h=96)
+    
+    # Calculate RMSE
+    acc <- accuracy(predictions, test_water_level)
+    rmse <- acc[2,2]
+    
+    if (rmse < best_rmse) {
+      best_rmse <- rmse
+      best_P <- P
+      best_decay <- d
+      best_model <- model
+    }
+  }
+}
+
+# Print the best model's parameters and RMSE
+cat("Best Model Parameters:\n")
+cat("Best P: ", P, "\n")
+cat("Best Decay: ", d, "\n")
+cat("Best RMSE: ", best_rmse, "\n")
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+
+set.seed(123)
+
+nnetar_model_best <- nnetar(train_water_level, P=12, size = 11, repeats = 20, lambda = "auto", decay = 1)
+print(nnetar_model_best)
+# Plot residuals from NNETAR model
+plot(nnetar_model_best$residuals, main = "Residuals from NNETAR Model")
+
+mean(nnetar_model_best$residuals, na.rm = TRUE)
+fcast_nnetar_model <- forecast(nnetar_model_best, h=96)
+fcast_nnetar_model$mean
+plot(fcast_nnetar_model, xlab = "Year", ylab = "Water Level (in m)")
+accuracy(fcast_nnetar_model, test_water_level)
+
+Box.test(nnetar_model_best$residuals, type = "Ljung-Box")
+checkresiduals(nnetar_model_best$residuals)
+
+resid <- residuals(nnetar_model_best)
+shapiro.test(nnetar_model_best$residuals)
+tsdisplay(nnetar_model_best$residuals)
+acf(resid, main = "ACF Plot of NNETAR Residuals")
+
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+
+#Benchmark Models
+
+##Mean Forecast
+
+fcast_mean <- meanf(train_water_level, h=96)
+plot(fcast_mean)
+accuracy(fcast_mean, test_water_level)
+
+##Naive Forecast
+
+fcast_naive <- naive(train_water_level, h=96)
+plot(fcast_naive)
+accuracy(fcast_naive, test_water_level)
+
+##Seasonal Naive Forecast
+
+fcast_snaive <- snaive(train_water_level, h=96)
+plot(fcast_snaive, xlab = "Year", ylab = "Water Level (in m)")
+accuracy(fcast_snaive, test_water_level)
+
+##Random Walk Forecast
+
+fcast_rwf <- rwf(train_water_level, h=156)
+plot(fcast_rwf)
+accuracy(fcast_rwf, test_water_level)
+
+
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+
+#Time Series Cross-Validation
+
+#Setting the parameters for time series cross-validation
+
+k <- 304 #Minimum number of samples for training
+n <- 456
+p <- 12 #Period is 12 months
+h <- 96
+
+st <- tsp(water_level_lake_ont_ts)[1] + (k-2)/p
+
+defaultW <- getOption("warn") 
+options(warn = -1)
+
+aicc_expanding_arima <- numeric(152)
+aicc_sliding_arima <- numeric(152)
+
+aicc_expanding_ets <- numeric(152)
+aicc_sliding_ets <- numeric(152)
+
+mae_expanding_arima <- matrix(NA, n-k, h)
+mae_sliding_arima <- matrix(NA, n-k, h)
+
+rmse_expanding_arima <- matrix(NA, n-k, h)
+rmse_sliding_arima <- matrix(NA, n-k, h)
+
+mae_expanding_ets <- matrix(NA, n-k, h)
+mae_sliding_ets <- matrix(NA, n-k, h)
+
+rmse_expanding_ets <- matrix(NA, n-k, h)
+rmse_sliding_ets <- matrix(NA, n-k, h)
+
+mae_expanding_nnar <- matrix(NA, n-k, h)
+mae_sliding_nnar <- matrix(NA, n-k, h)
+
+rmse_expanding_nnar <- matrix(NA, n-k, h)
+rmse_sliding_nnar <- matrix(NA, n-k, h)
+
+mae_expanding_tbats <- matrix(NA, n-k, h)
+mae_sliding_tbats <- matrix(NA, n-k, h)
+
+rmse_expanding_tbats <- matrix(NA, n-k, h)
+rmse_sliding_tbats <- matrix(NA, n-k, h)
+
+#Iterations for cross-validation
+for(i in 1:(n-k)) {
+  
+  ### 96 months rolling forecasting
+  
+  # Expanding Window: Window Length: initial is k = 160 and then increment by 1 
+  expanding_train <- window(water_level_lake_ont_ts, end = st + i/p)
+  
+  # Sliding Window: Window Length: k
+  sliding_train <- window(water_level_lake_ont_ts, start = st + (i-k+1)/p, end = st + i/p) ## Window Length: k
+  
+  test <- window(water_level_lake_ont_ts, start = st + (i+1)/p, end = st + (i+h)/p)
+  
+   if (i<5) {
+  cat(c("*** CV", i,":","len(Expanding Window):",length(expanding_train), "len(Sliding Window):",length(sliding_train), "len(Test):",length(test),'\n'  ))
+  cat(c("*** TRAIN -  Expanding WIndow:",tsp(expanding_train)[1],'-',tsp(expanding_train)[2],'\n'))
+  cat(c("*** TRAIN - Sliding WIndow:",tsp(sliding_train)[1],'-',tsp(sliding_train)[2],'\n'))
+  cat(c("*** TEST:",tsp(test)[1],'-',tsp(test)[2],'\n'))
+  cat("*************************** \n \n")
+  }
+
+  #ARIMA: Expanding Window
+  
+  fit_arima_expanding <- Arima(expanding_train, order=c(1,0,1), seasonal=list(order=c(2,0,2), period=p), lambda = "auto")
+  fcast_arima_expanding <- forecast(fit_arima_expanding, h=h)
+  
+  aicc_expanding_arima[i] <- fit_arima_expanding$aicc
+  mae_expanding_arima[i,1:length(test)] <- abs(fcast_arima_expanding[['mean']]-test)
+  rmse_expanding_arima[i,1:length(test)] <- (fcast_arima_expanding[['mean']]-test)^2
+  
+  #ARIMA: Sliding Window
+  
+  fit_arima_sliding <- Arima(sliding_train, order=c(1,0,1), seasonal=list(order=c(0,1,2), period=p),lambda = "auto")
+  fcast_arima_sliding <- forecast(fit_arima_sliding, h=h)
+  
+  aicc_sliding_arima[i] <- fit_arima_sliding$aicc
+  mae_sliding_arima[i, 1:length(test)] <- abs(fcast_arima_sliding[['mean']]-test)
+  rmse_sliding_arima[i, 1:length(test)] <- (fcast_arima_sliding[['mean']]-test)^2
+  
+  #ETS: Expanding Window
+  
+  fit_ets_mam_expanding <- ets(expanding_train, model = "MAM")
+  fcast_ets_mam_expanding <- forecast(fit_ets_mam_expanding, h=h)
+  
+  aicc_expanding_ets[i] <- fit_ets_mam_expanding$aicc
+
+  
+  #ETS: Sliding Window
+  
+  fit_ets_mam_sliding <- ets(sliding_train, model = "MAM")
+  fcast_ets_mam_sliding <- forecast(fit_ets_mam_sliding, h=h)
+  
+  aicc_sliding_ets[i] <- fit_ets_mam_sliding$aicc
+  mae_sliding_ets[i,1:length(test)] <- abs(fcast_ets_mam_sliding[['mean']]-test)
+  rmse_sliding_ets[i,1:length(test)] <- (fcast_ets_mam_sliding[['mean']]-test)^2
+  
+  #NNAR: Expanding Window
+  
+  fit_nnar_expanding <- nnetar(expanding_train, P=12, size = 11, repeats = 20, lambda = "auto", decay = 1)
+  fcast_nnar_expanding <- forecast(fit_nnar_expanding, h=h)
+  
+  mae_expanding_nnar[i,1:length(test)] <- abs(fcast_nnar_expanding[['mean']]-test)
+  rmse_expanding_nnar[i,1:length(test)] <- (fcast_nnar_expanding[['mean']]-test)^2
+  
+  #NNAR: Sliding Window
+  
+  fit_nnar_sliding <- nnetar(sliding_train, P=12, size = 11, repeats = 20, lambda = "auto", decay = 1)
+  fcast_nnar_sliding <- forecast(fit_nnar_sliding, h=h)
+  
+  mae_sliding_nnar[i,1:length(test)] <- abs(fcast_nnar_sliding[['mean']]-test)
+  rmse_sliding_nnar[i,1:length(test)] <- (fcast_nnar_sliding[['mean']]-test)^2
+  
+  #TBATS: Expanding Window
+  
+  fit_tbats_expanding <- tbats(expanding_train)
+  fcast_tbats_expanding <- forecast(fit_tbats_expanding, h=h)
+  
+  mae_expanding_tbats[i,1:length(test)] <- abs(fcast_tbats_expanding[['mean']]-test)
+  rmse_expanding_tbats[i,1:length(test)] <- (fcast_tbats_expanding[['mean']]-test)^2
+  
+  #TBATS: Expanding Window
+  
+  fit_tbats_sliding <- tbats(sliding_train)
+  fcast_tbats_sliding <- forecast(fit_tbats_sliding, h=h)
+  
+  mae_sliding_tbats[i,1:length(test)] <- abs(fcast_tbats_sliding[['mean']]-test)
+  rmse_sliding_tbats[i,1:length(test)] <- (fcast_tbats_sliding[['mean']]-test)^2
+}
+
+```
+```{r, warning=FALSE, message=FALSE}
+
+#MAE vs Forecast Horizon
+
+df <- data.frame(
+  horizon = rep(1:96, 8),  # Repeating each horizon for each method
+  MAE = c(
+    colMeans(mae_expanding_arima, na.rm = TRUE), 
+    colMeans(mae_sliding_arima, na.rm = TRUE),
+    colMeans(mae_expanding_ets, na.rm = TRUE),  
+    colMeans(mae_sliding_ets, na.rm = TRUE),
+    colMeans(mae_expanding_nnar, na.rm = TRUE), 
+    colMeans(mae_sliding_nnar, na.rm = TRUE),
+    colMeans(mae_expanding_tbats, na.rm = TRUE),  
+    colMeans(mae_sliding_tbats, na.rm = TRUE)
+  ),
+  Method = rep(c("sARIMA - Expanding Window", 
+                 "sARIMA - Sliding Window", 
+                 "ETS - Expanding Window", 
+                 "ETS - Sliding Window",
+                 "NNAR - Expanding Window",
+                 "NNAR - Sliding Window",
+                 "TBATS - Expanding Window",
+                 "TBATS - Sliding Window"), each=96)
+);
+
+df$Method <- factor(df$Method, levels = c("sARIMA - Expanding Window", 
+                 "sARIMA - Sliding Window", 
+                 "ETS - Expanding Window", 
+                 "ETS - Sliding Window",
+                 "NNAR - Expanding Window",
+                 "NNAR - Sliding Window",
+                 "TBATS - Expanding Window",
+                 "TBATS - Sliding Window"))
+
+ggplot(df, aes(x=horizon, y=MAE, color=Method)) +
+  geom_line() +
+  geom_point() +
+  scale_x_continuous(breaks=seq(6, 96, by=6)) +
+  labs(
+    y="MAE", x="Horizon (Months)", 
+    title="Mean Absolute Forecast Error (MAE) vs Forecast Horizon",
+    color="Method"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position="right",
+    legend.title=element_blank(),
+    plot.title=element_text(hjust=0.5),
+    axis.title=element_text(size=12, face="bold"),
+    axis.text=element_text(size=10),
+    legend.text=element_text(size=10)
+  ) +
+  scale_color_manual(values=c(
+    "sARIMA - Expanding Window" = "black",
+    "sARIMA - Sliding Window" = "blue",
+    "ETS - Expanding Window" = "red",
+    "ETS - Sliding Window" = "magenta",
+    "NNAR - Expanding Window" = "green",
+    "NNAR - Sliding Window" = "cyan",
+    "TBATS - Expanding Window" = "orange",
+    "TBATS - Sliding Window" = "maroon"))
+
+plot <- ggplot(df, aes(x = horizon, y = MAE, color = Method)) +
+  geom_line(size = 1.2) +
+  geom_point(size = 3) +
+  scale_x_continuous(breaks = seq(6, 96, by = 6)) +
+  labs(
+    y = "MAE",
+    x = "Horizon (Months)", 
+    title = "Mean Absolute Forecast Error (MAE) vs Forecast Horizon",
+    color = "Method"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    legend.title = element_blank(),
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    axis.title = element_text(size = 14, face = "bold"),
+    axis.text = element_text(size = 12),
+    legend.text = element_text(size = 12),
+    panel.background = element_rect(fill = "transparent", color = NA),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(fill = "transparent", color = NA),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  ) +
+  scale_color_manual(values = c(
+    "sARIMA - Expanding Window" = "black",
+    "sARIMA - Sliding Window" = "blue",
+    "ETS - Expanding Window" = "red",
+    "ETS - Sliding Window" = "magenta",
+    "NNAR - Expanding Window" = "green",
+    "NNAR - Sliding Window" = "cyan",
+    "TBATS - Expanding Window" = "orange",
+    "TBATS - Sliding Window" = "maroon"
+  ))
+
+print(plot)
+    
+
+
+```
+```{r, warning=FALSE, message=FALSE}
+
+#RMSE vs Forecast Horizon
+
+df1 <- data.frame(
+  horizon = rep(1:96, 8),  # Repeating each horizon for each method
+  RMSE = c(
+    colMeans(rmse_expanding_arima, na.rm = TRUE), 
+    colMeans(rmse_sliding_arima, na.rm = TRUE),
+    colMeans(rmse_expanding_ets, na.rm = TRUE),  
+    colMeans(rmse_sliding_ets, na.rm = TRUE),
+    colMeans(rmse_expanding_nnar, na.rm = TRUE), 
+    colMeans(rmse_sliding_nnar, na.rm = TRUE),
+    colMeans(rmse_expanding_tbats, na.rm = TRUE),  
+    colMeans(rmse_sliding_tbats, na.rm = TRUE)
+  ),
+  Method = rep(c("sARIMA - Expanding Window", 
+                 "sARIMA - Sliding Window", 
+                 "ETS - Expanding Window", 
+                 "ETS - Sliding Window",
+                 "NNAR - Expanding Window",
+                 "NNAR - Sliding Window",
+                 "TBATS - Expanding Window",
+                 "TBATS - Sliding Window"), each=96)
+);
+
+df1$Method <- factor(df$Method, levels = c("sARIMA - Expanding Window", 
+                 "sARIMA - Sliding Window", 
+                 "ETS - Expanding Window", 
+                 "ETS - Sliding Window",
+                 "NNAR - Expanding Window",
+                 "NNAR - Sliding Window",
+                 "TBATS - Expanding Window",
+                 "TBATS - Sliding Window"))
+
+ggplot(df1, aes(x=horizon, y=RMSE, color=Method)) +
+  geom_line() +
+  geom_point() +
+  scale_x_continuous(breaks=seq(6, 96, by=6)) +
+  labs(
+    y="RMSE", x="Horizon (Months)", 
+    title="RMSE vs Forecast Horizon",
+    color="Method"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position="right",
+    legend.title=element_blank(),
+    plot.title=element_text(hjust=0.5),
+    axis.title=element_text(size=12, face="bold"),
+    axis.text=element_text(size=10),
+    legend.text=element_text(size=10)
+  ) +
+  scale_color_manual(values=c(
+    "sARIMA - Expanding Window" = "black",
+    "sARIMA - Sliding Window" = "blue",
+    "ETS - Expanding Window" = "red",
+    "ETS - Sliding Window" = "magenta",
+    "NNAR - Expanding Window" = "green",
+    "NNAR - Sliding Window" = "cyan",
+    "TBATS - Expanding Window" = "orange",
+    "TBATS - Sliding Window" = "maroon"
+  ));
+
+# Create the plot
+plot2 <- ggplot(df1, aes(x = horizon, y = RMSE, color = Method)) +
+  geom_line(size = 1.2) +
+  geom_point(size = 3) +
+  scale_x_continuous(breaks = seq(6, 96, by = 6)) +
+  labs(
+    y = "RMSE",
+    x = "Horizon (Months)", 
+    title = "RMSE vs Forecast Horizon",
+    color = "Method"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    legend.title = element_blank(),
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    axis.title = element_text(size = 14, face = "bold"),
+    axis.text = element_text(size = 12),
+    legend.text = element_text(size = 12),
+    panel.background = element_rect(fill = "transparent", color = NA),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(fill = "transparent", color = NA),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  ) +
+  scale_color_manual(values = c(
+    "sARIMA - Expanding Window" = "black",
+    "sARIMA - Sliding Window" = "blue",
+    "ETS - Expanding Window" = "red",
+    "ETS - Sliding Window" = "magenta",
+    "NNAR - Expanding Window" = "green",
+    "NNAR - Sliding Window" = "cyan",
+    "TBATS - Expanding Window" = "orange",
+    "TBATS - Sliding Window" = "maroon"
+  ))
+
+print(plot2)
+
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+
+#AICc vs Iteration Number
+
+aicc_data <- data.frame(
+  Iteration = rep(1:152, 4),
+  Value = c(aicc_expanding_arima, aicc_sliding_arima, aicc_expanding_ets, aicc_sliding_ets),
+  Model = factor(rep(c("AICc_sARIMA_Expanding", "AICc_sARIMA_Sliding", "AICc_ETS_Expanding", "AICc_ETS_Sliding"), each=152))
+)
+
+ggplot() +
+  geom_line(data = aicc_data[aicc_data$Model == "AICc_sARIMA_Expanding", ], aes(x = Iteration, y = Value, color = "AICc_sARIMA_Expanding")) +
+  geom_point(data = aicc_data[aicc_data$Model == "AICc_sARIMA_Expanding", ], aes(x = Iteration, y = Value, color = "AICc_sARIMA_Expanding")) +
+  
+  geom_line(data = aicc_data[aicc_data$Model == "AICc_sARIMA_Sliding", ], aes(x = Iteration, y = Value, color = "AICc_sARIMA_Sliding")) +
+  geom_point(data = aicc_data[aicc_data$Model == "AICc_sARIMA_Sliding", ], aes(x = Iteration, y = Value, color = "AICc_sARIMA_Sliding")) +
+  
+  geom_line(data = aicc_data[aicc_data$Model == "AICc_ETS_Expanding", ], aes(x = Iteration, y = Value, color = "AICc_ETS_Expanding")) +
+  geom_point(data = aicc_data[aicc_data$Model == "AICc_ETS_Expanding", ], aes(x = Iteration, y = Value, color = "AICc_ETS_Expanding")) +
+  
+  geom_line(data = aicc_data[aicc_data$Model == "AICc_ETS_Sliding", ], aes(x = Iteration, y = Value, color = "AICc_ETS_Sliding")) +
+  geom_point(data = aicc_data[aicc_data$Model == "AICc_ETS_Sliding", ], aes(x = Iteration, y = Value, color = "AICc_ETS_Sliding")) +
+  
+  scale_color_manual(values = c(
+    "AICc_sARIMA_Expanding" = "black",
+    "AICc_sARIMA_Sliding" = "blue",
+    "AICc_ETS_Expanding" = "red",
+    "AICc_ETS_Sliding" = "purple"
+  )) +
+  labs(x = "Iteration", y = "AICc", title = "AICc Values for Expanding and Sliding Window Models", color = "Model") +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    legend.title = element_blank(),
+    plot.title = element_text(hjust = 0.5),
+    axis.title = element_text(size = 12, face = "bold"),
+    axis.text = element_text(size = 10),
+    legend.text = element_text(size = 10)
+  ) +
+  scale_x_continuous(breaks = seq(8, 152, by = 19))
+
+```
+```{r, warning=FALSE, message=FALSE}
+# Generate the dates sequence
+dates <- seq(as.Date("1980-01-01"), as.Date("2017-12-01"), by="month")
+str(dates)
+
+# Print the length of arima_fcast to check consistency
+length(arima_fcast)
+
+# Generate training dates sequence
+train_dates <- seq(as.Date("1980-01-01"), as.Date("2009-12-01"), by="month")
+
+# Create the training data frame
+train_df <- data.frame(Date = train_dates, Water_Level = train_water_level)
+
+# Assuming the test data starts from January 2010 and has the same length as the forecasts
+forecast_dates <- seq(as.Date("2010-01-01"), by = "month", length.out = length(arima_fcast))
+
+# Create the forecast data frame
+forecast_df <- data.frame(
+  Date = forecast_dates,
+  ETS = ets_fcast,
+  ARIMA = arima_fcast,
+  NNAR = fcast_nnetar_model$mean,
+  TBATS = fcast_model9$mean,
+  Test_Data = test_water_level
+)
+
+# Mutate the training data frame
+train_df <- train_df %>%
+  mutate(Forecast = Water_Level, Source = "Training Data", Model = "Training Data")
+
+# Pivot the forecast data frame to long format
+forecast_long <- forecast_df %>%
+  pivot_longer(cols = -Date, names_to = "Model", values_to = "Forecast") %>%
+  mutate(Source = ifelse(Model == "Test_Data", "Test Data", "Forecast"),
+         Model = ifelse(Model == "Test_Data", "Actual Test Data", Model))
+
+# Combine the training and forecast data frames
+combined_df <- bind_rows(train_df, forecast_long)
+
+# Create the plot with transparent background and no gridlines
+plot1 <- ggplot(combined_df, aes(x = Date, y = Forecast, color = Model)) +
+  geom_line(data = filter(combined_df, Source == "Training Data"), size = 1) +
+  geom_line(data = filter(combined_df, Source == "Forecast"), linetype = "dashed", size = 1) +
+  geom_line(data = filter(combined_df, Source == "Test Data"), size = 1.1) +
+  scale_color_manual(values = c("Training Data" = "black", "ETS" = "blue", "ARIMA" = "red", "NNAR" = "green", "TBATS" = "purple", "Actual Test Data" = "orange")) +
+  labs(title = "Lake Ontario Water Level with Forecasts (2010-2017)", x = "Year", y = "Water Level (in m)", color = "Legend") +
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "transparent", color = NA),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(fill = "transparent", color = NA),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+print(plot1)
+
+```
