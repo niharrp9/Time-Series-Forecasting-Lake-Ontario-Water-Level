@@ -1,7 +1,5 @@
 # Time-Series-Forecasting-Lake-Ontario-Water-Level
 
-# Lake Ontario Monthly Mean Water Level Analysis and Forecasting
-
 This repository contains the analysis and forecasting of the monthly mean water levels of Lake Ontario. The project involves exploratory data analysis, model building, and forecasting using various time series models.
 
 # Project Overview
